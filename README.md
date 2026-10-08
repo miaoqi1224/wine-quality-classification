@@ -1,33 +1,41 @@
-# Diamond Price Regression Analysis
+# White Wine Quality Classification
 
-A multi-part regression analysis of diamond pricing — from descriptive statistics to multiple linear regression with diagnostics.
+A comparative study of machine learning techniques for classifying white wine quality from physicochemical properties.
 
 ## Overview
 
-Using a 2022 diamond prices dataset, this project walks through the full regression workflow: sampling, exploratory analysis, correlation structure, model fitting, and interpretation. Built as PSTAT 126 (Regression Analysis) coursework at UC Santa Barbara.
+Using the Wine Quality dataset (4,898 white wine samples, 11 chemical features), this project frames wine quality as a three-class classification problem — **inferior**, **ordinary**, and **superior** — and compares three classifiers: **k-Nearest Neighbors**, **Decision Tree**, and **Random Forest**.
 
-## What's inside
+## Key Results
 
-- **Part 1 — Data description & descriptive statistics**: random sampling, variable typing, summary statistics, correlation matrix with scatterplots, boxplots of price by cut/color
-- **Part 2** — extended modeling and inference
-- **Part 3** — model refinement and conclusions
-- **Full project report** (`126project`) — end-to-end write-up
+| Model | Test Accuracy |
+|---|---|
+| Random Forest | **94.08%** |
+| k-NN | >92% |
+| Decision Tree | >92% |
 
-Core techniques: multiple linear regression (`lm`), correlation analysis, residual diagnostics, categorical predictor handling (cut, color, clarity).
+Random Forest emerged as the top performer. Analysis also surfaced meaningful feature relationships (e.g., density vs. residual sugar) and the challenge of class imbalance — both inferior and superior wines proved harder to classify than ordinary ones.
+
+## Methodology
+
+1. **Exploratory data analysis** — distributions, correlations (`corrplot`), identification of redundant features
+2. **Feature selection** — removed near-zero-variance and highly correlated features to reduce redundancy
+3. **Model training** — 10-fold cross-validated k-NN, Decision Tree (`rpart`), and Random Forest (`randomForest`)
+4. **Evaluation** — confusion matrices, per-class accuracy, feature importance
 
 ## Files
 
-- `126project.Rmd` / `126project.pdf` — complete project report (source + rendered)
-- `126part2.Rmd` / `126part2.pdf`, `126part3.Rmd` / `126part3.pdf` — staged analysis parts
-- `Diamonds_Prices2022.csv` — dataset
+- `131-final.Rmd` — full analysis source (R Markdown)
+- `131-final.pdf` — rendered report
+- `winequality-white.csv` — dataset (semicolon-delimited)
 
 ## Run it
 
 ```r
-# Requires: dplyr, ggplot2
-rmarkdown::render("126project.Rmd")
+# Requires: readr, dplyr, ggplot2, corrplot, caret, rpart, randomForest, e1071
+rmarkdown::render("131-final.Rmd")
 ```
 
 ## Author
 
-Miao Qi — M.A. Statistics, Columbia University (Advanced Machine Learning Track).
+Miao Qi — M.A. Statistics, Columbia University (Advanced Machine Learning Track). Originally developed as the PSTAT 131 final project at UC Santa Barbara (with Wei Xie).
