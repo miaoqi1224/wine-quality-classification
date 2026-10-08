@@ -1,0 +1,549 @@
+---
+title: "A Comparative Study of Machine Learning Techniques for Classifying White Wine Quality"
+subtitle: "PSTAT-131 final project"
+author: "Miao Qi, Wei Xie"
+date: "2025-03-18"
+output: 
+  pdf_document:
+    keep_tex: true
+    toc: true
+    number_sections: true
+    fig_caption: true
+    df_print: paged
+    highlight: tango
+    latex_engine: xelatex
+  word_document:
+    toc: true
+fontsize: 12pt
+geometry: margin=1in
+fontfamily: mathpazo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r,message=FALSE, echo=FALSE}
+options(warn = -1)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+library(MASS)
+library(tinytex)
+library(tidyverse)
+library(knitr)
+library(tibble)
+```
+
+# Abstract
+
+This study evaluates the effectiveness of k-Nearest Neighbors (kNN), Decision Tree, and Random Forest for predicting white wine quality based on physicochemical variables such as alcohol content, free sulfur dioxide, volatile acidity, and residual sugar. Through exploratory data analysis, we identified significant correlations (e.g., between density and residual sugar) and removed highly correlated features to reduce redundancy. Despite an imbalanced dataset—most wines are of “ordinary” quality—all three models achieved over 92% accuracy on the test set, with Random Forest emerging as the top performer at 94.08%. However, both inferior and superior wines remained harder to classify, indicating the need for improved class-imbalance strategies. Future work should explore data resampling, additional ensemble methods, and potentially include sensory variables to further refine predictive capabilities.
+
+
+# Introduction
+
+Wine possesses unique sensorial and chemical profiles, deeply influenced by the terroir—a combination of climate, soil composition, and winemaking techniques that shape its distinctive characteristics (Rocha). However, modern winemakers increasingly adopt data-driven approaches to quantify and predict quality based on measurable chemical properties. Such predictions are important for maintaining consistent production, guiding blending decisions, and meeting consumer expectations in competitive markets.
+
+In this project, we use machine learning to model and predict the quality of white wine from its key physicochemical features (e.g., acidity, alcohol, sulfur dioxide levels). Specifically, we **clean and explore** the dataset, identifying distributions and relationships among variables. Then perform **feature selection**, removing near-zero-variance and highly correlated features to minimize redundancy. Also **train and evaluate** three classification models (kNN, Decision Tree, Random Forest) to predict wine quality, framed as a three-category classification problem (“inferior,” “ordinary,” and “superior”). Finally **interpret results** via confusion matrices, overall accuracy, feature importance, and limitations due to class imbalance. By comparing these models, we highlight the trade-offs between model complexity and predictive performance, ultimately providing insights for improving wine quality classification in future research or industrial settings.
+
+
+
+## Import Dataset
+
+```{r, message=FALSE}
+wine_white <- read_delim("winequality-white.csv", delim = ";")
+wine_white %>% 
+  head() %>% 
+  kable(caption = "First 6 Rows of the White Wine Quality Dataset")
+```
+
+
+## Data Cleaning
+
+
+```{r, echo=FALSE}
+missing_values <- data.frame(
+  Column = names(wine_white),
+  Missing_Count = colSums(is.na(wine_white))
+)
+
+knitr::kable(missing_values, format = "markdown", caption = "Missing Values in wine_white Dataset")
+```
+
+The dataset contains no missing values across all features, thus no imputation or data removal is required.
+
+
+Then, to ensure consistency and compatibility during data processing, column names were standardized by replacing spaces with underscores. This avoids potential issues when referencing column names in statistical modeling and visualization. 
+
+```{r, echo=FALSE}
+# Fix column names
+new_names <- gsub(" ", "_", names(wine_white))
+names(wine_white) <- new_names
+
+# Display
+col_names_df <- data.frame(Index = seq_along(names(wine_white)), Column_Names = names(wine_white))
+knitr::kable(col_names_df, format = "markdown", caption = "Updated Column Names in wine_white Dataset")
+
+```
+
+
+# Explortory Analysis
+
+```{r, echo=FALSE, echo=FALSE}
+# Generate summary statistics
+summary(wine_white)
+```
+
+## Visualization and Description
+
+```{r, echo=FALSE}
+# Convert dataset to long format for ggplot
+wine_long <- wine_white %>%
+  pivot_longer(cols = where(is.numeric), names_to = "Feature", values_to = "Value")
+
+# Plot histograms for all features
+ggplot(wine_long, aes(x = Value)) +
+  geom_histogram(bins = 30, color = "white") +
+  facet_wrap(~ Feature, scales = "free") +
+  theme_minimal() +
+  labs(title = "Feature Distributions", h = 0.5, x = "Value", y = "Count")
+```
+
+**Some Key Observations**:
+
+The quality scores are mostly concentrated between 5 and 7, indicating that the dataset is slightly imbalanced toward mid-range quality wines. Alcohol content follows a right-skewed distribution, with most wines containing between 9% and 13% alcohol, suggesting that higher-alcohol wines are less common. Acidity levels, including fixed acidity and volatile acidity, are also skewed, with a majority of wines having moderate acidity levels, while pH values follow a normal distribution centered around 3.2 to 3.3, indicating a slightly acidic nature. Residual sugar is heavily skewed, with most wines containing low sugar levels but a few having extremely high concentrations. Sulfur dioxide, crucial for wine preservation, exhibits a bell-shaped distribution, particularly in total sulfur dioxide, while free sulfur dioxide is more concentrated at lower levels. The density of wines remains consistent around 1.0, reflecting typical wine characteristics, whereas chlorides (salt content) are mostly low but have a few higher outliers that could affect taste. Sulphates and citric acid, important for wine preservation and acidity balance, show a normal-like distribution, with citric acid peaking around 0.4–0.6 g/L. These distributions suggest that certain features, such as alcohol, acidity, and sulfur dioxide levels, may have a strong influence on wine quality, making them key variables for predictive modeling.
+
+
+## Select interested variable: "Quality"
+
+The quality variable represents sensory-based wine ratings, typically on a scale from 3 (poor) to 9 (excellent). It is selected as the target variable because this directly reflects overall wine desirability based on taste, aroma, and structure. Also, this variable allows for classification/regression modeling, predicting wine quality based on its chemical composition. Quality affects consumer preference & market pricing, making it a valuable metric for wine producers.
+
+```{r, echo=FALSE}
+# Distribution of target variable (Quality
+print(sort(table(wine_white$quality)))
+```
+
+```{r,echo=FALSE}
+# Visualizing the target variable
+ggplot(wine_white, aes(x = factor(quality))) +
+  geom_bar() +
+  labs(title = "Distribution of Wine Quality",
+       x = "Quality Score",
+       y = "Count") +
+  theme_minimal()
+```
+
+The bar chart illustrates the distribution of wine quality scores in the white wine dataset. The quality ratings range from 3 to 9, with the majority of samples falling between 5 and 7. The most frequent score is 6, followed by 5 and 7, indicating that most wines in the dataset are of average to slightly above-average quality. The number of wines rated 4, 8, and 9 is significantly lower, suggesting that very poor or exceptional wines are rare in this dataset. This distribution is slightly skewed toward the center, with a noticeable imbalance in extreme quality scores. The lack of highly rated wines (8 and above) may imply that very few wines in this dataset are considered excellent, while the low occurrence of scores below 5 indicates that poor-quality wines are also relatively uncommon.
+
+
+# Feature Selection
+
+In the feature selection process, the goal is to identify the most relevant predictors of wine quality while removing redundant or non-informative variables to enhance model efficiency and interpretability. 
+
+```{r}
+x <- wine_white %>% dplyr::select(-quality) # Remove 'quality'
+
+# Identify near zero variance features
+nzv <- nearZeroVar(wine_white, saveMetrics = TRUE)
+nzv_features <- rownames(nzv[nzv$nzv, ])
+
+if(length(nzv_features) > 0) {
+  cat("Near zero variance features detected:\n")
+  print(nzv_features)
+} else {
+  cat("No near zero variance features detected.\n")
+}
+```
+
+The results indicate that no near zero variance (NZV) features were detected in the dataset. This means that all variables in wine_white exhibit sufficient variation across observations, and there are no predictors with extremely low variance that would contribute little to the model.
+
+
+Then, we can move directly to feature correlation analysis or proceed to scaling and normalization.
+
+```{r}
+# Define a function to categorize quality
+quality_to_category <- function(q) {
+  if (q <= 4) {
+    return("inferior")
+  } else if (q <= 7) {
+    return("ordinary")
+  } else {
+    return("superior")
+  }
+}
+```
+
+
+```{r, echo=FALSE}
+# Apply the function
+wine_white$quality_label <- sapply(wine_white$quality, quality_to_category)
+wine_white$quality_label <- factor(
+  wine_white$quality_label,
+  levels = c("inferior", "ordinary", "superior")
+)
+
+# Check distribution
+label_counts <- table(wine_white$quality_label)
+knitr::kable(label_counts,
+             col.names = c("Quality Category", "Count"),
+             caption = "Distribution of Wine Quality Categories")
+```
+
+The summary table displays the frequency distribution of these categories. The majority of the wines (4,535 samples) fall into the ordinary category, aligning with the previously observed concentration of wine quality scores around 5-7. The inferior and superior categories are nearly equal in size, with 183 and 180 samples, respectively, highlighting the dataset's imbalance in extreme quality levels. This suggests that most wines are of average quality, while very few wines are rated as either particularly poor or exceptionally good.
+
+
+```{r, echo=FALSE}
+# Exclude the 'quality' and 'quality_label' for correlation analysis
+feature_data <- wine_white %>%
+  dplyr::select(-quality, -quality_label)
+
+# Correlation matrix
+cor_mat <- cor(feature_data)
+knitr::kable(cor_mat[1:6, 1:6], caption = "Partial Correlation Matrix")
+```
+
+From the matrix, we observe some notable relationships among features. Fixed acidity and citric acid show a moderate positive correlation (0.2891), indicating that wines with higher fixed acidity tend to have more citric acid. Similarly, residual sugar and free sulfur dioxide are positively correlated (0.2991), suggesting that wines with more residual sugar may also have a higher amount of free sulfur dioxide, potentially due to its role in preservation.
+
+On the other hand, volatile acidity and citric acid exhibit a negative correlation (-0.1495), implying that as citric acid content increases, volatile acidity tends to decrease. This relationship is relevant because higher volatile acidity is often linked to unpleasant sourness in wine, whereas citric acid can contribute to a more balanced acidity profile. Another small negative correlation appears between volatile acidity and free sulfur dioxide (-0.0970), though the magnitude is weak.
+
+
+```{r}
+# Visualize correlation with heatmap
+corrplot(cor_mat, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+The heatmap visualization of the correlation matrix provides valuable insights into the relationships between different physicochemical properties of white wine. Density and residual sugar exhibit a strong positive correlation, indicating that wines with higher sugar content tend to have greater density, which is consistent with the role of sugar in increasing liquid mass. Conversely, alcohol and density show a strong negative correlation, suggesting that higher alcohol content results in lower density, as ethanol is less dense than water. Additionally, total sulfur dioxide and free sulfur dioxide are positively correlated, reinforcing the expectation that the total amount of sulfur dioxide in wine includes its free form. A moderate positive correlation between citric acid and fixed acidity implies that wines with higher acidity levels often contain more citric acid, a common acidity regulator in winemaking. Moreover, pH and fixed acidity display a negative correlation, which aligns with the fundamental chemical property that higher acidity corresponds to lower pH values.
+
+
+```{r}
+# Identify highly correlated features (|corr| > 0.6)
+threshold <- 0.6
+high_corr <- which(abs(cor_mat) > threshold & abs(cor_mat) < 1, arr.ind = TRUE)
+high_corr_pairs <- data.frame(
+  feature1 = rownames(cor_mat)[high_corr[, 1]],
+  feature2 = colnames(cor_mat)[high_corr[, 2]],
+  correlation = cor_mat[high_corr]
+)
+```
+
+
+```{r,echo=FALSE}
+if(nrow(high_corr_pairs) > 0) {
+  knitr::kable(high_corr_pairs, caption = "Highly Correlated Feature Pairs (|corr| > 0.6)")
+} else {
+  cat("No highly correlated feature pairs found.\n")
+}
+```
+
+
+A strong positive correlation (0.8389) between density and residual sugar suggests that wines with higher sugar content tend to have greater density, which aligns with the fact that sugar contributes to the mass and viscosity of the liquid. This may indicates potential collinearity, so we remove density from featured variable.b
+
+```{r}
+selected_features <- feature_data %>% dplyr::select(-density)
+colnames(selected_features) # Updated feature names
+```
+
+
+
+# Model Training and Evaluation
+
+## Split Traning Set and Test Set
+```{r}
+set.seed(42)
+
+# Use updated feature set (if correlated features removed)
+X <- selected_features
+y <- wine_white$quality_label
+
+# Train-test split
+# 80% as traning data, remaining as test
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_index, ]
+X_test <- X[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+dim(X_train); dim(X_test) # Verify
+```
+
+## KNN Model
+
+Here, we train and evaluate a k-Nearest Neighbors (kNN) classifier using the caret package. The kNN model classifies data points based on the majority class of their k nearest neighbors in feature space. We will use cross-validation to determine the optimal value of k, visualize the confusion matrix to assess model performance, and compare its accuracy with other classification models to evaluate its effectiveness in predicting wine quality.
+
+```{r, warning=F,echo=FALSE}
+# Preprocessing: center and scale
+preproc <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preproc, X_train)
+X_test_scaled  <- predict(preproc, X_test)
+
+# Define possible k values
+k_vals <- data.frame(k = 1:30)
+
+# Train the kNN model
+set.seed(42)
+knn_fit <- train(
+  x = X_train_scaled,
+  y = y_train,
+  method = "knn",
+  tuneGrid = k_vals,
+  trControl = trainControl(method = "cv", number = 10),
+  metric = "Accuracy"
+)
+
+# Best k
+best_k <- knn_fit$bestTune$k
+cat("Best k found by cross-validation:", best_k, "\n")
+
+# Accuracy from CV
+cv_accuracy <- max(knn_fit$results$Accuracy)
+cat("Max CV Accuracy:", cv_accuracy, "\n")
+
+# Evaluate on test set
+knn_predictions <- predict(knn_fit, newdata = X_test_scaled)
+knn_conf_mat <- confusionMatrix(knn_predictions, y_test)
+
+cat("\n--- kNN Classification Report ---\n")
+knn_conf_mat
+```
+
+The kNN classification report provides an overview of the model's performance in predicting wine quality categories. The best k value selected through cross-validation was 16, achieving a maximum cross-validation accuracy of 92.68%. However, despite the high accuracy, the confusion matrix reveals major classification issues—the model classifies all samples into the "ordinary" category, completely failing to identify "inferior" and "superior" wines. This results in a sensitivity of 0 for both "inferior" and "superior" classes, indicating that the model does not correctly identify any instances from these groups. While the specificity for these classes is 1, meaning the model never incorrectly labels an "ordinary" wine as "inferior" or "superior," it comes at the cost of failing to recognize true instances of these classes. The Kappa statistic is 0, confirming that the model provides no better agreement than random chance beyond the majority class. The balanced accuracy of 50% across all classes suggests a severe imbalance issue, where the model essentially collapses into predicting only the dominant category.
+
+
+```{r, echo=FALSE}
+# Visualize K vs. Accuracy
+# Extract k values and corresponding accuracy
+k_values <- knn_fit$results$k
+accuracy_values <- knn_fit$results$Accuracy
+
+# Create a data frame for plotting
+accuracy_df <- data.frame(K = k_values, Accuracy = accuracy_values)
+
+# Plot K vs Accuracy
+ggplot(accuracy_df, aes(x = K, y = Accuracy)) +
+  geom_line(color = "blue", size = 1) + 
+  geom_point(color = "red", size = 2) +
+  labs(title = "K vs. Accuracy in kNN",
+       x = "Number of Neighbors (K)",
+       y = "Accuracy") +
+  theme_minimal()
+```
+
+The graph presents the relationship between the number of neighbors (K) and the accuracy of the k-Nearest Neighbors (kNN) model. Initially, for small values of K, accuracy fluctuates significantly, showing a sharp dip before stabilizing. As K increases beyond approximately 5, the accuracy steadily improves, peaking at around K = 16. This suggests that the model benefits from averaging more neighbors, reducing overfitting to noise present in smaller K-values. Beyond K = 16, the accuracy stabilizes, with only minor variations, indicating diminishing returns in increasing K further. This pattern is expected in kNN models—lower values of K tend to overfit, while higher values smooth out predictions at the cost of finer decision boundaries. The selection of K = 16 as the optimal value, as seen in previous reports, aligns with this trend, striking a balance between bias and variance. However, the slight drop in accuracy at very low K values suggests instability in the model’s performance, which may indicate a need for better feature scaling or handling of class imbalances.
+
+
+## Decision Tree
+
+In this section, we train and evaluate a Decision Tree classifier using the rpart package. The Decision Tree model recursively splits the data based on feature values to create a tree-like structure that classifies wine quality. We will also visualize the confusion matrix to assess the model's performance and analyze the tree structure to understand which features play the most significant role in predicting wine quality.
+
+```{r,echo=FALSE}
+# Combine training predictors & outcome into one data frame
+train_data <- data.frame(X_train, y_train)
+
+# Create formula
+tree_formula <- as.formula(paste("y_train ~", paste(names(X_train), collapse = " + ")))
+
+# Train a decision tree using rpart
+set.seed(42)
+dt_model <- rpart(tree_formula,
+                  data = train_data,
+                  method = "class",
+                  parms = list(split = "information"))
+
+# Cross-validation with caret
+dt_fit <- train(
+  tree_formula,
+  data = train_data,
+  method = "rpart",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneLength = 10,
+  metric = "Accuracy"
+)
+
+# Evaluate on the test set
+dt_predictions <- predict(dt_model, newdata = X_test, type = "class")
+dt_conf_mat <- confusionMatrix(dt_predictions, y_test)
+
+dt_fit$bestTune
+```
+
+
+```{r,echo=FALSE}
+cat("\n--- Decision Tree Classification Report ---\n")
+dt_conf_mat
+```
+
+The decision tree classification analysis provides insights into the model’s predictive performance on wine quality categorization. The decision tree was trained using the rpart method, with cross-validation applied to optimize accuracy. The confusion matrix indicates that the model primarily classifies most samples as "ordinary," with minimal instances of "inferior" and "superior" classes being correctly predicted. The overall accuracy of 92.44% suggests strong performance, yet the class-specific metrics reveal significant imbalance. Sensitivity for the "ordinary" class is very high at 99.12%, whereas for the "inferior" and "superior" classes, it is notably low (16.67% and 0%, respectively). This implies that while the model performs well in identifying ordinary wines, it struggles to distinguish between high and low-quality categories. The low kappa value (0.1238) suggests weak agreement beyond random chance, reinforcing the classification imbalance issue.
+
+
+```{r,echo=FALSE}
+# Plot the decision tree
+rpart.plot(dt_model,
+           type = 3,
+           extra = 1,
+           main = "Decision Tree for Wine Quality")
+
+```
+
+The tree splits based on key features such as free sulfur dioxide, volatile acidity, alcohol content, and residual sugar. The first major split occurs at free sulfur dioxide (<9.5 vs. ≥9.5), suggesting its significant role in determining wine quality. Inferior wines (red nodes) tend to have higher volatile acidity and lower pH values, while superior wines (green node) are associated with higher alcohol content (≥11) and residual sugar levels (≥14). Most classifications fall into the "ordinary" category, reinforcing the class imbalance seen in the confusion matrix. The model structure indicates that alcohol content plays a critical role in distinguishing higher-quality wines, while acidity and sulfur dioxide levels help separate inferior ones. However, the tree’s depth suggests potential overfitting, and alternative methods such as pruning or ensemble models may improve generalization.
+
+
+## Random Forest
+
+In this section, we train and evaluate a Random Forest classifier using the 'caret' package. We will also visualize the confusion matrix and compute feature importance to understand which variables contribute the most to predictive accuracy.
+
+```{r,echo=FALSE}
+# Combine X_train (predictors) and y_train (outcome) into one data frame
+train_data_rf <- data.frame(X_train, y_train = y_train)
+
+# Construct the formula for random forest
+rf_formula <- reformulate(termlabels = names(X_train), response = "y_train")
+
+# Define a grid of hyperparameters for mtry (number of features randomly selected at each split)
+param_grid <- expand.grid(mtry = c(2, 4, 6))
+
+# Set random seed for reproducibility
+set.seed(42)
+
+# Train the Random Forest model with caret
+rf_model <- train(
+  rf_formula,
+  data = train_data_rf,
+  method = "rf",
+  tuneGrid = param_grid,
+  trControl = trainControl(method = "cv", number = 5),  # 5-fold cross-validation
+  ntree = 100,                # Number of trees
+  metric = "Accuracy",
+  importance = TRUE           # Enable feature importance calculation
+)
+
+# Print the best hyperparameters found
+best_params <- rf_model$bestTune
+cat("Best hyperparameters:\n")
+print(best_params)
+
+# Retrieve the best cross-validation accuracy
+cv_scores_mean_rf <- max(rf_model$results$Accuracy)
+cat(sprintf("5-fold CV best accuracy: %.4f\n", cv_scores_mean_rf))
+
+
+```
+
+
+```{r,echo=FALSE}
+# Make predictions on the test set
+rf_predictions <- predict(rf_model, newdata = X_test)
+
+# Evaluate the model on the test set
+rf_conf_mat <- confusionMatrix(rf_predictions, y_test)
+test_accuracy_rf <- rf_conf_mat$overall["Accuracy"]
+cat(sprintf("Random Forest Test Set Accuracy: %.4f\n", test_accuracy_rf))
+
+# Display the confusion matrix details
+cat("\n--- Random Forest Confusion Matrix ---\n")
+print(rf_conf_mat)
+
+```
+
+```{r,echo=FALSE}
+rf_var_imp <- varImp(rf_model, scale = TRUE)
+
+cat("\n--- Random Forest Variable Importance (Caret) ---\n")
+print(rf_var_imp)
+
+# Create a data frame from varImp for plotting
+importance_df <- data.frame(
+  Feature    = row.names(rf_var_imp$importance),
+  Importance = rowMeans(rf_var_imp$importance) # Summarize per-class importance
+)
+
+# Order by descending importance
+importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+```
+
+The random forest classification report shows an overall accuracy of 94.08%, demonstrating strong predictive performance. The sensitivity and specificity metrics indicate that the model performs well in identifying "ordinary" wines, with a sensitivity of 0.9901 and a positive predictive value (PPV) of 0.9483. However, classification performance for "inferior" and "superior" wines is weaker. The sensitivity for "inferior" wines is only 0.25, meaning that many true "inferior" wines are misclassified. Similarly, the sensitivity for "superior" wines is 0.3889, showing difficulty in correctly identifying high-quality wines. On the other hand, the high specificity (0.99682 for "superior" and 0.993637 for "inferior") indicates that when the model does classify a wine as "superior" or "inferior," it is usually correct. The balanced accuracy for "ordinary" wines is 0.6548, which is relatively low, suggesting that despite the model's overall high accuracy, it struggles with class imbalance. The Kappa statistic of 0.4227 suggests moderate agreement beyond chance, indicating room for improvement.
+
+
+```{r,echo=FALSE}
+ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +
+  labs(
+    title = "Random Forest Feature Importance",
+    x = "Feature",
+    y = "Importance (Averaged Across Classes)"
+  ) +
+  theme_minimal()
+```
+
+The bar chart represents the feature importance derived from a random forest model for predicting wine quality. Among the features, alcohol has the highest importance, indicating that it plays the most significant role in determining wine quality. Following this, free sulfur dioxide and volatile acidity also exhibit substantial importance, suggesting their strong influence on the classification. Chlorides and residual sugar contribute moderately to the model’s decisions, while fixed acidity, citric acid, total sulfur dioxide, pH, and sulphates are relatively less impactful.
+
+
+# Conclusion
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+# Define function to compare model accuracies
+compare_models <- function(model_accuracies) {
+  # Extract model names and accuracies
+  model_names <- names(model_accuracies)
+  accuracies  <- unlist(model_accuracies)
+  
+  # Create data frame
+  plot_data <- data.frame(
+    Model    = model_names,  
+    Accuracy = accuracies     
+  )
+
+  # Print table of model accuracies in R Markdown
+  cat("\n### Model Accuracy Comparison\n")
+  kable(plot_data, format = "markdown", digits = 4)
+
+  # Plot accuracy comparison
+  ggplot(plot_data, aes(x = Model, y = Accuracy)) +
+    geom_bar(stat = "identity", fill = "darkorange") +
+    geom_text(aes(label = sprintf("%.4f", Accuracy)), vjust = -0.5) +
+    ggtitle("Comparison of Model Accuracies") +
+    xlab("Model") +
+    ylab("Test Set Accuracy") +
+    ylim(0.8, 1.0) +
+    theme_minimal()
+}
+
+model_accuracies <- list(
+  KNN = knn_fit$results$Accuracy,
+  DecisionTree = dt_model$results$Accuracy,
+  RandomForest = rf_model$results$Accuracy
+)
+
+compare_models(model_accuracies)
+
+```
+The function compares the test set accuracies of three classification models: Decision Tree, k-Nearest Neighbors (kNN), and Random Forest. Each model has multiple accuracy points plotted, indicating the variability in performance across different runs or cross-validation folds. The Decision Tree model achieves a maximum accuracy of 0.9411, while kNN and Random Forest slightly outperform it with maximum accuracies of 0.9413 and 0.9416, respectively. The spread of accuracy values suggests that all three models perform similarly, with Random Forest showing the highest peak accuracy. However, the Decision Tree model exhibits a wider range of accuracies, with the lowest recorded at 0.9015, compared to 0.9120 for kNN and 0.9132 for Random Forest.
+
+
+
+The results demonstrate that machine learning can effectively classify white wine quality using readily available chemical metrics. Despite an imbalanced dataset—where most wines fall into the “ordinary” category—all three models (kNN, Decision Tree, and Random Forest) attained over 92% accuracy on the test set. Random Forest emerged as the top performer at 94.08%, marginally outperforming kNN and Decision Tree. Feature importance analysis revealed that alcohol is the most critical predictor of wine quality, followed by free sulfur dioxide, volatile acidity, and residual sugar. However, each model exhibited difficulty in correctly identifying the “inferior” and “superior” categories, indicating that class imbalance remains a prominent challenge. 
+
+
+## Future Work
+
+However, despite these high accuracy levels, class imbalance remains a significant challenge, as all models exhibited difficulty in correctly classifying extreme wine qualities (inferior and superior). Future work could explore data resampling techniques, ensemble learning methods, and hyperparameter tuning to enhance classification performance further. Additionally, incorporating sensory data alongside physicochemical attributes may improve model robustness and better reflect real-world wine evaluation. Overall, this study demonstrates the effectiveness of machine learning in wine quality assessment and provides a foundation for further refinement in predictive modeling.
+
+
+
+# Reference
+
+Paulo Cortez, António Cerdeira, Fernando Almeida, Telmo Matos, José Reis, Modeling wine preferences by data mining from physicochemical properties, Decision Support Systems,Volume 47, Issue 4, 2009, Pages 547-553, ISSN 0167-9236,
+https://doi.org/10.1016/j.dss.2009.05.016.(https://www.sciencedirect.com/science/article/pii/S0167923609001377). Accessed 19 Mar. 2025.
+
+Cortez, P., Cerdeira, A., Almeida, F., Matos, T., & Reis, J. (2009). Wine Quality [Dataset]. UCI Machine Learning Repository. <https://doi.org/10.24432/C56S3T>.
+
+
+# Appendix
+
+All raw code used for data preprocessing, feature selection, and model training (KNN, Decision Tree, and Random Forest) is contained in the R Markdown (Rmd) file. The appendix provides a summary of key outputs, but for full reproducibility, the complete implementation can be referenced in the Rmd file.
+
